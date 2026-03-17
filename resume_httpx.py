@@ -1,3 +1,18 @@
+#!/usr/bin/env python3
+"""
+--------------------------------------------------------------------------------
+PROJECT  : Resume HTTPX (Automation Layer)
+VERSION  : 1.2.1
+DEVELOPER: Encrypter15 (encrypter15@gmail.com)
+GITHUB   : https://github.com/encrypter15
+--------------------------------------------------------------------------------
+NOTES:
+- Input Sanitization: Strips regex/wildcards from scope files before scanning.
+- Logic-Driven: Uses strict timeouts (5s) to prevent thread-hangs on dead subnets.
+- Post-Processing: Auto-sorts output by status code for rapid analysis.
+--------------------------------------------------------------------------------
+"""
+
 import subprocess
 import os
 import sys
@@ -9,32 +24,61 @@ CLEAN_FILE = "clean_assets.txt"
 OUTPUT_FILE = "live_bounty.txt"
 RESUME_FILE = "resume.cfg"
 
-# Optimized for speed and mobile stability
+# Network Aggression (Adjust for mobile/low-bandwidth if needed)
 RATE_LIMIT = 50 
 THREADS = 15
 TIMEOUT = 5
 RETRIES = 1
 
 def sanitize_input():
-    """Strips regex, wildcards, and paths to give httpx clean targets."""
+    """Extracts valid FQDNs/IPs. Strips the junk causing 'hours' of delays."""
     if not os.path.exists(INPUT_FILE):
-        print(f"[!] Error: {INPUT_FILE} not found.")
+        print(f"[!] Critical Error: {INPUT_FILE} is missing.")
         sys.exit(1)
         
-    print(f"[*] Sanitizing {INPUT_FILE}...")
-    # Matches FQDNs and IPv4s only
+    print(f"[*] Analyzing {INPUT_FILE} for valid targets...")
+    
+    # Matches standard hostnames and IPv4 addresses
     pattern = r'\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}\b|\b(?:\d{1,3}\.){3}\d{1,3}\b'
     
     with open(INPUT_FILE, 'r') as f:
         content = f.read().lower()
     
-    clean_targets = sorted(set(re.findall(pattern, content)))
+    matches = re.findall(pattern, content)
+    clean_targets = sorted(set(matches))
     
     with open(CLEAN_FILE, 'w') as f:
         f.write("\n".join(clean_targets))
     
-    print(f"[*] Cleaned {len(clean_targets)} targets. Ready to scan.")
+    print(f"[*] Sanitized {len(clean_targets)} targets.")
     return CLEAN_FILE
+
+def sort_results():
+    """Sorts live_bounty.txt so the hits (200 OK) are at the top."""
+    if not os.path.exists(OUTPUT_FILE):
+        print("[!] No output file found to sort.")
+        return
+        
+    print(f"[*] Post-processing: Sorting results by status code...")
+    
+    with open(OUTPUT_FILE, 'r') as f:
+        lines = f.readlines()
+    
+    def get_status_rank(line):
+        match = re.search(r'\[(\d{3})\]', line)
+        if match:
+            code = match.group(1)
+            # Prioritize 200, then 403, 401, then redirects
+            if code == "200": return (0, code)
+            if code in ["403", "401"]: return (1, code)
+            return (2, code)
+        return (3, "999")
+
+    lines.sort(key=get_status_rank)
+    
+    with open(OUTPUT_FILE, 'w') as f:
+        f.writelines(lines)
+    print(f"[*] Finalized {OUTPUT_FILE}.")
 
 def run_httpx(target_list):
     use_resume = os.path.exists(RESUME_FILE)
@@ -47,7 +91,7 @@ def run_httpx(target_list):
         "-threads", str(THREADS),
         "-timeout", str(TIMEOUT),
         "-retries", str(RETRIES),
-        "-status-code", # Shows 200/403/etc so you see progress
+        "-status-code", 
         "-silent" 
     ]
 
@@ -55,21 +99,20 @@ def run_httpx(target_list):
         cmd.extend(["-resume", RESUME_FILE])
         print(f"[*] Resuming scan from {RESUME_FILE}...")
     else:
-        print("[*] Starting fresh scan...")
+        print("[*] Initiating fresh scan...")
 
     try:
-        # Using subprocess.run for better stability
+        # Popen replaced with run for synchronous reliability
         subprocess.run(cmd, check=True)
-        print(f"[*] Scan complete. Results in {OUTPUT_FILE}")
+        sort_results()
+        print("[*] All processes complete.")
     except KeyboardInterrupt:
-        print("\n[!] Interrupted. Resume data saved to resume.cfg.")
+        print("\n[!] Execution paused. Resume config preserved.")
         sys.exit(0)
-    except Exception as e:
-        print(f"\n[!] Execution Error: {e}")
+    except subprocess.CalledProcessError as e:
+        print(f"\n[!] HTTPX Error: {e}")
 
 if __name__ == "__main__":
-    # 1. Clean the junk
+    print(f"--- Resume HTTPX v1.2.1 | Dev: Encrypter15 ---")
     sanitized_file = sanitize_input()
-    
-    # 2. Run the scan
     run_httpx(sanitized_file)
