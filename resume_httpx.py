@@ -1,49 +1,46 @@
 import subprocess
-import time
-import sys
 import os
+import sys
 
 INPUT_FILE = "filtered_assets.txt"
 OUTPUT_FILE = "live_bounty.txt"
 RESUME_FILE = "resume.cfg"
-BATCH_SIZE = 5000          # Process \~5000 hosts, then pause/resume
-RATE_LIMIT = 25            # req/sec
-THREADS = 8   # or lower like 5 for phone
+RATE_LIMIT = 25
+THREADS = 8
 
-def run_httpx(use_resume=False):
+def run_httpx():
+    # Check if we should resume
+    use_resume = os.path.exists(RESUME_FILE)
+    
     cmd = [
         "httpx",
         "-l", INPUT_FILE,
-        "-silent",
         "-o", OUTPUT_FILE,
         "-rl", str(RATE_LIMIT),
         "-threads", str(THREADS),
         "-retries", "2",
-        "-timeout", "15"
+        "-timeout", "10",
+        "-v" # Added for visibility
     ]
-    if use_resume and os.path.exists(RESUME_FILE):
+
+    if use_resume:
         cmd.extend(["-resume", RESUME_FILE])
-        print(f"Resuming from {RESUME_FILE}")
+        print(f"[*] Resuming from {RESUME_FILE}")
     else:
-        print("Starting fresh scan")
+        print("[*] Starting fresh scan")
 
-    # Run and wait
-    process = subprocess.Popen(cmd)
     try:
-        process.wait()
+        # Using run() instead of Popen for synchronous execution
+        subprocess.run(cmd, check=True)
     except KeyboardInterrupt:
-        print("\nInterrupted — httpx should have created resume.cfg")
+        print("\n[!] Interrupted. Resume config saved.")
+        sys.exit(0)
+    except Exception as e:
+        print(f"\n[!] Error: {e}")
+
+if __name__ == "__main__":
+    if not os.path.exists(INPUT_FILE):
+        print(f"Error: {INPUT_FILE} not found.")
         sys.exit(1)
-
-# Optional: Simple batching (if you want manual pauses)
-lines = sum(1 for _ in open(INPUT_FILE))
-print(f"Total targets: {lines}")
-
-# But since httpx resumes natively, just run once — interrupt as needed
-run_httpx(use_resume=True)  # Change to False for fresh start
-
-# Or loop with pauses (less needed):
-# for i in range(0, lines, BATCH_SIZE):
-#     print(f"Batch {i//BATCH_SIZE + 1}")
-#     run_httpx(use_resume=True)
-#     time.sleep(300)  # 5 min pause — or manual Ctrl+C3
+        
+    run_httpx()
